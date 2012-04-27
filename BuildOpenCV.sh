@@ -9,7 +9,7 @@
 # Support site: http://computer-vision-talks.com
 ################################################################################
 
-if [ $# -ne 2 ]
+if [ $# -lt 2 ]
 then
     echo "Error in $0 - Invalid Argument Count"
     echo "Syntax: $0 [OpenCV source directory] [Build destination directory]"
@@ -27,8 +27,11 @@ D=`dirname "$2"`
 B=`basename "$2"`
 BUILD="`cd \"$D\" 2>/dev/null && pwd || echo \"$D\"`/$B"
 
+TARGET=${3:-"none"}
+
 INTERMEDIATE=$BUILD/tmp
 IOS_DEV_BUILD_DIR=$INTERMEDIATE/ios-dev-build
+IOS_DEV_ARMV6_BUILD_DIR=$INTERMEDIATE/ios-dev-armv6-build
 IOS_SIM_BUILD_DIR=$INTERMEDIATE/ios-sim-build
 
 ################################################################################
@@ -59,6 +62,28 @@ xcodebuild -sdk iphoneos -configuration Release -target install install
 xcodebuild -sdk iphoneos -configuration Debug -target ALL_BUILD
 popd
 
+if [ $TARGET = "all" ]
+then
+################################################################################
+# Build release and debug configurations for iOS armv6 device
+mkdir -p $IOS_DEV_ARMV6_BUILD_DIR
+pushd $IOS_DEV_ARMV6_BUILD_DIR
+cmake -GXcode -DCMAKE_TOOLCHAIN_FILE=$SRC/ios/cmake/Toolchains/Toolchain-iPhoneOS_Xcode.cmake \
+-DCMAKE_INSTALL_PREFIX=$INTERMEDIATE/install \
+-DOPENCV_BUILD_3RDPARTY_LIBS=YES \
+-DBUILD_EXAMPLES=NO \
+-DBUILD_TESTS=NO \
+-DBUILD_NEW_PYTHON_SUPPORT=NO \
+-DBUILD_PERF_TESTS=NO \
+-DCMAKE_XCODE_ATTRIBUTE_GCC_VERSION="com.apple.compilers.llvmgcc42" $SRC
+
+xcodebuild -sdk iphoneos -configuration Release ARCHS="armv6" -target ALL_BUILD
+xcodebuild -sdk iphoneos -configuration Release ARCHS="armv6" -target install install
+xcodebuild -sdk iphoneos -configuration Debug ARCHS="armv6" -target ALL_BUILD
+popd
+
+fi
+
 ################################################################################
 # Build release and debug configurations for iOS simulator
 mkdir -p $IOS_SIM_BUILD_DIR
@@ -80,9 +105,44 @@ popd
 cp -f $IOS_DEV_BUILD_DIR/3rdparty/lib/Debug/*.a   $IOS_DEV_BUILD_DIR/lib/Debug/
 cp -f $IOS_DEV_BUILD_DIR/3rdparty/lib/Release/*.a $IOS_DEV_BUILD_DIR/lib/Release/
 
+if [ $TARGET = "all" ]
+then
+cp -f $IOS_DEV_ARMV6_BUILD_DIR/3rdparty/lib/Debug/*.a   $IOS_DEV_ARMV6_BUILD_DIR/lib/Debug/
+cp -f $IOS_DEV_ARMV6_BUILD_DIR/3rdparty/lib/Release/*.a $IOS_DEV_ARMV6_BUILD_DIR/lib/Release/
+
+fi
+
 cp -f $IOS_SIM_BUILD_DIR/3rdparty/lib/Debug/*.a   $IOS_SIM_BUILD_DIR/lib/Debug/
 cp -f $IOS_SIM_BUILD_DIR/3rdparty/lib/Release/*.a $IOS_SIM_BUILD_DIR/lib/Release/
 
+
+if [ $TARGET = "all" ]
+then
+################################################################################
+# Make universal binaries for release configuration:
+mkdir -p $BUILD/lib/Release/
+
+for FILE in `ls $IOS_DEV_BUILD_DIR/lib/Release`
+do
+  lipo $IOS_DEV_BUILD_DIR/lib/Release/$FILE \
+       $IOS_DEV_ARMV6_BUILD_DIR/lib/Release/$FILE \
+       $IOS_SIM_BUILD_DIR/lib/Release/$FILE \
+       -create -output $BUILD/lib/Release/$FILE
+done
+
+################################################################################
+# Make universal binaries for debug configuration:
+mkdir -p $BUILD/lib/Debug/
+
+for FILE in `ls $IOS_DEV_BUILD_DIR/lib/Debug`
+do
+lipo $IOS_DEV_BUILD_DIR/lib/Debug/$FILE \
+$IOS_DEV_ARMV6_BUILD_DIR/lib/Debug/$FILE \
+$IOS_SIM_BUILD_DIR/lib/Debug/$FILE \
+-create -output $BUILD/lib/Debug/$FILE
+done
+
+else
 ################################################################################
 # Make universal binaries for release configuration:
 mkdir -p $BUILD/lib/Release/
@@ -104,6 +164,9 @@ lipo $IOS_DEV_BUILD_DIR/lib/Debug/$FILE \
 $IOS_SIM_BUILD_DIR/lib/Debug/$FILE \
 -create -output $BUILD/lib/Debug/$FILE
 done
+
+fi
+
 
 ################################################################################
 # Copy headers:
